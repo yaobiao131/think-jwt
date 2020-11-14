@@ -7,6 +7,7 @@ namespace xiaodi\JWTAuth;
 use Lcobucci\JWT\Token;
 use Lcobucci\JWT\Parser;
 use think\App;
+use think\Cache;
 use xiaodi\JWTAuth\Exception\JWTException;
 
 class Manager
@@ -40,7 +41,7 @@ class Manager
     /**
      * 获取 缓存驱动.
      *
-     * @return void
+     * @return Cache
      */
     protected function getDefaultCache()
     {
@@ -60,7 +61,7 @@ class Manager
         $jti = $token->getClaim('jti');
         $store = $token->getClaim('store');
 
-        if ($jwt = $this->getLatestToken($jti, $store) && $isBlacklist) {
+        if (($jwt = $this->getLatestToken($jti, $store)) && $isBlacklist) {
             $oldToken = (new Parser)->parse($jwt);
             $this->addBlackList($oldToken);
         }
@@ -88,7 +89,7 @@ class Manager
 
     /**
      * 加入缓存用户已登录的应用
-     * 
+     *
      * @param [type] $store
      * @param [type] $value
      * @return void
@@ -130,8 +131,9 @@ class Manager
     /**
      * 获取用户应用下最新token
      *
-     * @param [type] $jti
-     * @return void
+     * @param $jti
+     * @param $store
+     * @return mixed
      */
     public function getLatestToken($jti, $store)
     {
@@ -143,6 +145,7 @@ class Manager
      * 获取 白名单 key
      *
      * @param string $jti
+     * @param $store
      * @return string
      */
     public function makeWhitelistKey($jti, $store)
@@ -245,7 +248,7 @@ class Manager
      * @param string $store
      * @return void
      */
-    public function joinToBlacklist($store)
+    public function joinToBlacklist(string $store)
     {
         $key = $this->makeStoreWhitelistKey($store);
         $keys = $this->storeLoggedKeys($store);
@@ -278,7 +281,7 @@ class Manager
      * @param string $store
      * @return array
      */
-    public function storeLoggedKeys($store)
+    public function storeLoggedKeys(string $store)
     {
         $key = $this->makeStoreWhitelistKey($store);
 

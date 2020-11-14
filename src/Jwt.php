@@ -106,7 +106,7 @@ class Jwt
      *
      * @return Token
      */
-    public function token(array $claims,bool $isBlacklist = false): Token
+    public function token(array $claims,bool $isBlacklist = true): Token
     {
         $uniqid = $this->makeTokenId($claims);
 
