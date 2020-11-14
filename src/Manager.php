@@ -51,15 +51,16 @@ class Manager
      * 处理登录时.
      *
      * @param Token $token
+     * @param bool $isBlacklist
      *
      * @return void
      */
-    public function login(Token $token)
+    public function login(Token $token,bool $isBlacklist)
     {
         $jti = $token->getClaim('jti');
         $store = $token->getClaim('store');
 
-        if ($jwt = $this->getLatestToken($jti, $store)) {
+        if ($jwt = $this->getLatestToken($jti, $store) && $isBlacklist) {
             $oldToken = (new Parser)->parse($jwt);
             $this->addBlackList($oldToken);
         }
