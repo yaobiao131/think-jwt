@@ -102,10 +102,11 @@ class Jwt
      * 生成 Token.
      *
      * @param array $claims
+     * @param bool $isBlacklist
      *
      * @return Token
      */
-    public function token(array $claims): Token
+    public function token(array $claims,bool $isBlacklist = false): Token
     {
         $uniqid = $this->makeTokenId($claims);
 
@@ -129,7 +130,7 @@ class Jwt
 
         $token = $builder->getToken($this->getSigner(), $this->makeSignerKey());
 
-        $this->app['jwt.manager']->login($token);
+        $this->app['jwt.manager']->login($token, $isBlacklist);
 
         return $token;
     }
