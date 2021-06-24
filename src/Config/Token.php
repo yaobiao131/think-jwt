@@ -5,13 +5,15 @@ declare(strict_types=1);
 namespace xiaodi\JWTAuth\Config;
 
 use Lcobucci\JWT\Signer;
-use Lcobucci\JWT\Signer\Key;
 use xiaodi\JWTAuth\Exception\JWTException;
-use think\App;
+use Lcobucci\JWT\Signer\Key\InMemory;
+use Lcobucci\JWT\Signer\Key;
+use Lcobucci\JWT\Signer\Key\LocalFileReference;
+use Lcobucci\JWT\Signer\Hmac;
+use Lcobucci\JWT\Signer\Rsa;
 
 class Token
 {
-    protected $unique_id_key = 'uid';
     protected $signer_key = null;
     protected $not_before = 0;
     protected $expires_at = 3600;
@@ -23,6 +25,8 @@ class Token
     protected $iss = 'client.xiaodim.com';
     protected $aud = 'server.xiaodim.com';
     protected $automatic_renewal = false;
+    protected $public_key = '';
+    protected $private_key = '';
 
     public function __construct(array $options)
     {
@@ -33,19 +37,43 @@ class Token
         }
     }
 
-    public function makeSignerKey()
+    public function getHamcKey(): Key
     {
-        $key = $this->signer_key;
-        if (empty($key)) {
+        if (empty($this->signer_key)) {
             throw new JWTException('config signer_key required.', 500);
         }
 
-        return new Key($key);
+        return InMemory::base64Encoded((string)$this->signer_key);
     }
 
-    public function getIdKey(): string
+    public function RSASigner()
     {
-        return $this->unique_id_key;
+        $signer = $this->getSigner();
+
+        return $signer instanceof Rsa;
+    }
+
+    public function getSignerKey(): Key
+    {
+        $signer = $this->getSigner();
+
+        if ($this->RSASigner()) {
+            return $this->getPrivateKey();
+        } else if ($signer instanceof Hmac) {
+            return $this->getHamcKey();
+        } else {
+            throw new JWTException('not support.', 500);
+        }
+    }
+
+    public function getPublicKey(): Key
+    {
+        return LocalFileReference::file($this->public_key);
+    }
+
+    public function getPrivateKey(): Key
+    {
+        return LocalFileReference::file($this->private_key);
     }
 
     public function getExpires()
@@ -83,12 +111,17 @@ class Token
         return $this->relogin_code;
     }
 
+    public function getRefreshCode()
+    {
+        return $this->refresh_code;
+    }
+
     public function getAutomaticRenewal()
     {
         return $this->automatic_renewal;
     }
 
-    public function getTokenType()
+    public function getType()
     {
         return $this->type;
     }

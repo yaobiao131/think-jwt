@@ -4,23 +4,20 @@ declare(strict_types=1);
 
 namespace xiaodi\JWTAuth\Service;
 
+use DateTimeZone;
+use DateTimeImmutable;
+use DateTimeInterface;
 use think\App;
-use Lcobucci\JWT\Builder;
-use Lcobucci\JWT\Token as JwtToken;
-use Lcobucci\JWT\ValidationData;
-use Lcobucci\JWT\Parser;
 use xiaodi\JWTAuth\Config\Token as Config;
-use xiaodi\JWTAuth\Exception\JWTException;
-use xiaodi\JWTAuth\Exception\JWTInvalidArgumentException;
-use xiaodi\JWTAuth\Exception\TokenAlreadyEexpired;
 use xiaodi\JWTAuth\Handle\RequestToken;
+use Lcobucci\JWT\Configuration;
+use Lcobucci\JWT\Token as JwtToken;
+use Lcobucci\JWT\Validation\Constraint\SignedWith;
+use Lcobucci\JWT\Validation\Constraint\ValidAt;
+use Lcobucci\Clock\SystemClock;
+use xiaodi\JWTAuth\Exception\JWTException;
+use Lcobucci\JWT\Signer\Key\InMemory;
 
-/**
- * Undocumented class
- *
- * @method JwtToken make()
- * @method bool verify()
- */
 class Token
 {
     /**
@@ -41,6 +38,11 @@ class Token
      */
     protected $token;
 
+    /**
+     * @var Configuration
+     */
+    private $jwtConfiguration;
+
     public function __construct(App $app)
     {
         $this->app = $app;
@@ -49,9 +51,16 @@ class Token
 
     protected function init()
     {
-        $options = $this->resolveConfig();
+        $this->resolveConfig();
+        $this->initJwtConfiguration();
+    }
 
-        $this->config = new Config($options);
+    public function initJwtConfiguration()
+    {
+        $this->jwtConfiguration = Configuration::forSymmetricSigner(
+            $this->config->getSigner(),
+            $this->config->getSignerKey()
+        );
     }
 
     protected function getStore()
@@ -59,177 +68,119 @@ class Token
         return $this->app->get('jwt')->getStore();
     }
 
-    protected function resolveConfig(): array
-    {
-        $store = $this->getStore();
-        $options = $this->app->config->get("jwt.stores.{$store}.token", []);
-
-        return $options;
-    }
-
-    protected function makeId(array $claims)
-    {
-        $key = $this->config->getIdKey();
-        if (!array_key_exists($key, $claims)) {
-            throw new JWTException("claims {$key} requried", 500);
-        }
-
-        return $claims[$key];
-    }
-
-    public function make(array $claims): JwtToken
-    {
-        $unique_id = $this->makeId($claims);
-
-        $now = time();
-        $expires = $now + $this->config->getExpires();
-        $refreshAt = $expires + $this->config->getRefreshTTL();
-        $notBefore = $this->config->getNotBefore();
-        $iss = $this->config->getIss();
-        $aud = $this->config->getAud();
-
-        $builder = new Builder();
-        $builder->setIssuer($iss)
-            ->setAudience($aud)
-            ->setId($unique_id, true)
-            ->setIssuedAt($now)
-            ->setNotBefore($now + $notBefore)
-            ->setExpiration($expires)
-            ->set('refreshAt', $refreshAt);
-
-        $builder->set('store', $this->getStore());
-
-        foreach ($claims as $key => $claim) {
-            $builder->set($key, $claim);
-        }
-
-        $token = $builder->getToken($this->config->getSigner(), $this->config->makeSignerKey());
-
-        return $token;
-    }
-
-    /**
-     * Token 自动续期
-     *
-     * @param Token $token
-     * @param int|string $ttl 秒数
-     * @return void
-     */
-    protected function automaticRenewalToken(JwtToken $token)
-    {
-        $claims = $token->getClaims();
-
-        unset($claims['iat']);
-        unset($claims['jti']);
-        unset($claims['nbf']);
-        unset($claims['exp']);
-        unset($claims['iss']);
-        unset($claims['aud']);
-        unset($claims['refreshAt']);
-
-        $token = $this->make($claims);
-        $claims = $token->getClaims();
-        $refreshAt = $claims['refreshAt'];
-
-        header('Access-Control-Expose-Headers:Automatic-Renewal-Token,Automatic-Renewal-Token-RefreshAt');
-        header("Automatic-Renewal-Token:$token");
-        header("Automatic-Renewal-Token-RefreshAt:$refreshAt");
-
-        return $token;
-    }
-
-    protected function parseToken(string $token): JwtToken
-    {
-        try {
-            $token = (new Parser())->parse($token);
-        } catch (\InvalidArgumentException $e) {
-            throw new JWTInvalidArgumentException('此 Token 解析失败', 500);
-        }
-
-        return $token;
-    }
-
-    /**
-     * 验证成功的Token
-     *
-     * @return JWTToken
-     */
-    public function getToken(): ?JwtToken
+    public function getToken()
     {
         return $this->token;
     }
 
-    public function verify(string $token): ?bool
+    protected function resolveConfig()
     {
-        $this->token = $this->parseToken($token);
+        $store = $this->getStore();
+        $options = $this->app->config->get("jwt.stores.{$store}.token", []);
 
-        if (false === $this->token->verify($this->config->getSigner(), $this->config->makeSignerKey())) {
-            throw new JWTException('此 Token 与 密钥不匹配', $this->config->getReloginCode());
-        }
-
-        // Token 是否已可用
-        $now = time();
-        $exp = $this->token->getClaim('nbf');
-        if ($now < $exp) {
-            throw new JWTException('此 Token 暂未可用', 500);
-        }
-
-        // 是否已过期
-        if (true === $this->token->isExpired()) {
-            if ($now <= $this->token->getClaim('refreshAt')) {
-                // 是否开启自动续签
-                if ($this->config->getAutomaticRenewal()) {
-                    $this->token = $this->automaticRenewalToken($this->token);
-                } else {
-                    throw new TokenAlreadyEexpired('Token 已过期，请重新刷新', $this->config->getRefreshCode());
-                }
-            } else {
-                throw new TokenAlreadyEexpired('Token 刷新时间已过，请重新登录', $this->config->getReloginCode());
-            }
+        if (!empty($options)) {
+            $this->config = new Config($options);
         } else {
-            // 是否存在黑名单
-            if (true === $this->app->get('jwt.manager')->wasBan($this->token)) {
-                throw new TokenAlreadyEexpired('Token 已被禁用，请重新登录', $this->config->getReloginCode());
-            }
+            throw new JWTException($store . '应用 Token 配置未完整', 500);
         }
-
-        $data = new ValidationData();
-
-        $jwt_id = $this->token->getHeader('jti');
-        $data->setIssuer($this->config->getIss());
-        $data->setAudience($this->config->getAud());
-        $data->setId($jwt_id);
-
-        if (!$this->token->validate($data)) {
-            throw new JWTException('此 Token 效验不通过', $this->config->getReloginCode());
-        }
-
-        return true;
     }
 
-    public function refresh(string $token = null): JwtToken
+    public function make($identifier, array $claims = []): JwtToken
     {
-        $token = $token ?: $this->getRequestToken();
-        $token = $this->parseToken($token);
+        $now   = new DateTimeImmutable();
+        $builder = $this->jwtConfiguration->builder()
+            ->permittedFor($this->config->getAud())
+            ->issuedBy($this->config->getIss())
+            ->identifiedBy((string)$identifier)
+            ->issuedAt($now)
+            ->canOnlyBeUsedAfter($now)
+            ->expiresAt($this->getExpiryDateTime($now))
+            ->relatedTo((string) $identifier)
+            ->withClaim('store', $this->getStore());
 
-        $claims = $token->getClaims();
+        foreach ($claims as $key => $value) {
+            $builder->withClaim($key, $value);
+        }
 
-        unset($claims['iat']);
-        unset($claims['jti']);
-        unset($claims['nbf']);
-        unset($claims['exp']);
-        unset($claims['iss']);
-        unset($claims['aud']);
-
-        $this->app->get('jwt.manager')->logout($token);
-
-        return $this->make($claims);
+        return $builder->getToken($this->jwtConfiguration->signer(), $this->jwtConfiguration->signingKey());
     }
 
-    public function logout(?string $token = null): void
+    public function getExpiryDateTime($now): DateTimeImmutable
+    {
+        $ttl = (string)$this->config->getExpires();
+        return $now->modify("+{$ttl} sec");
+    }
+
+    /**
+     *
+     * @param string $token
+     * @return JwtToken
+     */
+    public function parse(string $token): JwtToken
+    {
+        $this->token = $this->jwtConfiguration->parser()->parse($token);
+
+        return $this->token;
+    }
+
+    protected function getValidateConfig()
+    {
+        return Configuration::forSymmetricSigner(
+            $this->config->getSigner(),
+            $this->config->RSASigner() ? $this->config->getPublicKey() : $this->config->getHamcKey()
+        );
+    }
+
+    /**
+     * 效验合法性 Token
+     * @param string $token
+     * @return boolean
+     */
+    public function validate(string $token)
+    {
+        $token = $this->parse($token);
+
+        $jwtConfiguration = $this->getValidateConfig();
+
+        $jwtConfiguration->setValidationConstraints(
+            new SignedWith($jwtConfiguration->signer(), $jwtConfiguration->signingKey())
+        );
+
+        $constraints = $jwtConfiguration->validationConstraints();
+
+        return $jwtConfiguration->validator()->validate($token, ...$constraints);
+    }
+
+    /**
+     * 效验是否过期 Token
+     * @param string $token
+     * @return boolean
+     */
+    public function validateExp(string $token)
+    {
+        $token = $this->parse($token);
+
+        $jwtConfiguration = $this->getValidateConfig();
+
+        $jwtConfiguration->setValidationConstraints(
+            new ValidAt(new SystemClock(new DateTimeZone(\date_default_timezone_get()))),
+        );
+
+        $constraints = $jwtConfiguration->validationConstraints();
+
+        return $jwtConfiguration->validator()->validate($token, ...$constraints);
+    }
+
+
+    public function login(JwtToken $token)
+    {
+        $this->app->get('jwt.manange')->login($token);
+    }
+
+    public function logout(?string $token): void
     {
         $token = $token ?: $this->getRequestToken();
-        $token = $this->parseToken($token);
+        $token = $this->parse($token);
 
         $this->app->get('jwt.manager')->logout($token);
     }
@@ -243,18 +194,68 @@ class Token
     {
         $requestToken = new RequestToken($this->app);
 
-        $token = $requestToken->get($this->config->getTokenType());
+        $token = $requestToken->get($this->config->getType());
 
         return $token;
     }
 
-    public function getType(): string
+    public function isRefreshExpired(DateTimeInterface $now): bool
     {
-        return $this->config->getTokenType();
+        if (!$this->token->claims()->has('iat')) {
+            return false;
+        }
+
+        $iat = $this->token->claims()->get('iat');
+        $refresh_ttl = $this->config->getRefreshTTL();
+        $refresh_exp = $iat->modify("+{$refresh_ttl} sec");
+        return $now >= $refresh_exp;
     }
 
-    public function getRefreshTTL()
+    /**
+     * @var Config
+     */
+    public function getConfig()
     {
-        return $this->config->getRefreshTTL();
+        return $this->config;
+    }
+
+    /**
+     * Token 自动续期
+     *
+     * @param Token $token
+     * @param int|string $ttl 秒数
+     * @return void
+     */
+    public function automaticRenewalToken(JwtToken $token)
+    {
+        $claims = $token->claims()->all();
+
+        $jti = $claims['jti'];
+        unset($claims['aud']);
+        unset($claims['iss']);
+        unset($claims['jti']);
+        unset($claims['iat']);
+        unset($claims['nbf']);
+        unset($claims['exp']);
+        unset($claims['sub']);
+
+        $token = $this->make($jti, $claims);
+        $refreshAt = $this->config->getRefreshTTL();
+
+        header('Access-Control-Expose-Headers:Automatic-Renewal-Token,Automatic-Renewal-Token-RefreshAt');
+        header("Automatic-Renewal-Token:" . $token->toString());
+        header("Automatic-Renewal-Token-RefreshAt:$refreshAt");
+
+        return $token;
+    }
+
+    public function getClaims()
+    {
+        return $this->token->claims()->all();
+    }
+
+    public function getClaim($name)
+    {
+        return $this->token->claims()->get($name);
     }
 }

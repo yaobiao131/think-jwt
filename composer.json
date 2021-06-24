@@ -7,7 +7,7 @@
         "thinkphp"
     ],
     "description": "ThinkPHP Jwt Component",
-    "minimum-stability": "stable",
+    "minimum-stability": "dev",
     "authors": [
         {
             "name": "xiaodi",
@@ -15,12 +15,13 @@
         }
     ],
     "require": {
-        "php": ">=7.1.0",
+        "php": ">=7.4.0",
         "ext-json": "*",
         "ext-mbstring": "*",
-        "lcobucci/jwt": "^3.3",
+        "lcobucci/jwt": "4.0.1",
         "nette/php-generator": "^3.2",
-        "topthink/framework": "^6.0.2"
+        "topthink/framework": "^6.0",
+        "xiaodi/think-user": "0.0.1"
     },
     "require-dev": {
         "phpunit/phpunit": "^6.2",
@@ -31,7 +32,10 @@
     "autoload": {
         "psr-4": {
             "xiaodi\\JWTAuth\\": "src/"
-        }
+        },
+        "files": [
+            "src/helper.php"
+        ]
     },
     "autoload-dev": {
         "psr-4": {

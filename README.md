@@ -13,30 +13,50 @@ $ composer require xiaodi/think-jwt
 
 开发版
 ```sh
-$ composer require xiaodi/think-jwt:dev-master
+$ composer require xiaodi/think-jwt:dev-next
 ```
 
 ## 使用
-1. 命令生成签名key
-```sh
-$ php think jwt:make
-```
-
-2. 配置
+1. 配置
 `config/jwt.php`
 
-完整多应用配置
+完整配置
 ```php
 <?php
 
 return [
     'stores' => [
+        // 单应用时 默认使用此配置
+        'default' => [
+            'sso' => [
+                'enable' => false,
+            ],
+            'token' => [
+                'signer_key'    => 'tant',
+                'public_key'    => 'file://path/public.key',
+                'private_key'   => 'file://path/private.key',
+                'not_before'    => 0,
+                'expires_at'    => 3600,
+                'refresh_ttL'   => 7200,
+                'signer'       => 'Lcobucci\JWT\Signer\Hmac\Sha256',
+                'type'         => 'Header',
+                'relogin_code'      => 50001,
+                'refresh_code'      => 50002,
+                'iss'          => 'client.tant',
+                'aud'          => 'server.tant',
+                'automatic_renewal' => false,
+            ],
+            'user' => [
+                'bind' => false,
+                'class'  => null,
+            ]
+        ],
+        // 多应用时 对应应用的配置
         'admin' => [
             'sso' => [
                 'enable' => false,
             ],
             'token' => [
-                'unique_id_key' => 'uid',
                 'signer_key'    => 'tant',
                 'not_before'    => 0,
                 'expires_at'    => 3600,
@@ -67,7 +87,6 @@ return [
 
 ```
 ## token
-* `unique_id_key` 用户唯一标识
 * `signer_key` 密钥
 * `not_before` 时间前不能使用 默认生成后直接使用
 * `refresh_ttL` Token有效期（秒）
@@ -90,6 +109,10 @@ return [
 * `xiaodi\Exception\HasLoggedException`
 * `xiaodi\Exception\TokenAlreadyEexpired`
 
+### 缓存支持
+* File
+* Redis
+
 ## Token 生成
 ```php
 namespace app\home\controller\Auth;
@@ -102,12 +125,19 @@ public function login()
 
     // 自动获取当前应用下的jwt配置
     return json([
-        'token' => Jwt::token(['uid' => 1]),
+        'token' => Jwt::token($uid, ['params1' => 1, 'params2' => 2])->toString(),
+    ]);
+    
+    // 自定义用户模型
+    return json([
+        'token' => Jwt::token($uid, ['model' => CustomMember::class])->toString(),
     ]);
 }
 ```
 
 ## Token 验证
+
+自动获取当前应用（多应用下）配置。
 
 ### 手动验证
 ```php
@@ -135,7 +165,11 @@ class User {
 ```php
 use xiaodi\JWTAuth\Middleware\Jwt;
 
+// 自动获取当前应用配置
 Route::get('/hello', 'index/index')->middleware(Jwt::class);
+
+// 自定义应用 使用api应用配置
+Route::get('/hello', 'index/index')->middleware(Jwt::class, 'api');
 ```
 
 ## Token 自动获取
